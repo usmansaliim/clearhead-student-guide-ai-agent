@@ -1,0 +1,18 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+backend/memories/
+
+# Environment variables
+.env
+backend/.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+*.iml
+
