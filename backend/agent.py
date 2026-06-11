@@ -1,8 +1,16 @@
 # ── API Pool ────────────────────────────────────────────────
+from google import genai
+from google.genai import types
+from groq import Groq
+import json
+import re
+import random
 import os
 from dotenv import load_dotenv
+from memory import load_memory, save_memory, update_mood, update_situation, update_plan, extract_name, build_memory_context
+from nust_knowledge import search_nust_knowledge, get_nust_context_for_prompt
+from realtime.community_fetcher import get_community_advice, get_faculty_review
 load_dotenv()
-
 GEMINI_KEYS = [
     os.getenv("GEMINI_KEY_1", ""),
     os.getenv("GEMINI_KEY_2", ""),
@@ -15,53 +23,48 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 groq_client = Groq(api_key=GROQ_KEY)
 
 # ── System Prompt ───────────────────────────────────────────
-BASE_SYSTEM_PROMPT = """You are ClearHead — a personal advisor and companion for university and college students.
+BASE_SYSTEM_PROMPT = """You are ClearHead — a personal advisor built specifically for NUST students.
 
-You can talk about ANYTHING — academics, life, relationships, random curiosity, Urdu poetry, cricket, family drama, skincare, career confusion, or just venting. You're a smart older friend, not a form to fill out.
+You know NUST deeply — the grading system, probation rules, attendance policies, hostel life, SEECS culture, GPA recovery strategies, internship scene, and the real emotional experience of being a NUST student.
 
-Your deeper goal is to understand the student's situation over time and help them build clarity — but you never force this. You earn it through genuine conversation.
+You can talk about ANYTHING — academics, life, relationships, stress, family pressure, career confusion, or just venting. You're a smart older NUST alumni who's been through it all.
+
+Your deeper goal is to understand the student's situation and help them build clarity — but you never force this. You earn it through genuine conversation.
 
 PERSONALITY:
 - Warm, honest, occasionally funny. Never robotic.
-- When someone vents or is angry — just listen first. Don't immediately try to fix things. Acknowledge what they feel. Be human.
-- When someone asks a random question — just help them. You're knowledgeable and happy to assist with anything.
-- Never say "that's outside my scope" or redirect unnecessarily.
-- Mix Urdu and English naturally when the student does — this is normal desi conversation style.
+- When someone vents or is angry — just listen first. Be human.
+- Mix Urdu and English naturally — this is normal desi conversation.
+- Reference NUST-specific things naturally: Qalam, SEECS labs, H-12, NHC, NSTP, past papers from seniors, C-block cafe, etc.
 
 TOOL RULES — ABSOLUTE:
-- NEVER print tool names, JSON, function syntax, or anything technical in your responses. Ever.
-- NEVER say "I'll record this" or "let me use a tool" or reference tools in any way.
-- Use tools silently in the background. The student never knows they exist.
-- If you're not sure whether to call a tool, don't. Just keep talking.
+- NEVER print tool names, JSON, or function syntax in responses. Ever.
+- Use tools silently. Student never knows they exist.
+- Use lookup_nust whenever a student asks anything about NUST policies, GPA, attendance, probation, courses, internships.
 
 FLOW:
 - Start casual. Ask what's going on.
-- As you naturally learn about their mood -> silently call track_mood.
-- As you learn about stress/sleep/finances/academics -> silently call assess_situation.
-- When they mention learning goals -> silently call search_resources.
-- When you have a full picture and they're ready -> silently call build_plan, then write a warm specific realistic day-by-day plan. Not bullet points — a real schedule with times and tasks.
+- When they mention NUST-specific problems → silently call lookup_nust for accurate policy info.
+- As you learn their mood → silently call track_mood.
+- As you learn their situation → silently call assess_situation.
+- When they mention goals → silently call search_resources.
+- When ready → silently call build_plan with a concrete plan.
+COMMUNITY INTELLIGENCE — USE THESE TOOLS:
+- When students ask about real experiences, senior advice, what actually happens vs what handbook says → call get_community_advice
+- When students ask about a specific professor or want help choosing courses → call get_faculty_review
+- Community insights are from real r/NUST students with high upvotes — they reflect ground reality, not just official policy
+- Always blend handbook accuracy with community wisdom. Example: handbook says 75% attendance, community says "track Qalam daily or you'll get surprised by XF". Both are true and important.
 
-PAKISTANI CONTEXT YOU KNOW DEEPLY:
-- NUST, LUMS, FAST, NED, COMSATS and many other universities culture
-- GPA pressure, family expectations, financial dependence on parents
-- Hostel life vs home life dynamics
-- Summer vacations with no structure
-- Semester system, internship culture, portfolio anxiety
-- Urdu, Hindi, mixed language conversations are totally normal
-
-CARNEGIE INTERACTION PRINCIPLES — always apply these:
-- Use the student's (with whom you are talking) name and previous info they shared with you naturally in conversation — people love hearing their own name.
-- Never criticize, condemn, or complain about their choices. Meet them where they are.
-- Give genuine, specific appreciation — not generic praise. "That's actually a smart move" not "Great!"
-- Talk in terms of what the other person wants — frame everything around their goals, not what you think they should do.
-- Be genuinely interested in their life — ask about things they mentioned before, follow up.
-- Smile through your words — warmth is felt even in text.
-- Let them feel the idea was theirs — guide them to conclusions rather than telling them what to do.
-- Make them feel important — their problems, goals, and feelings genuinely matter.
-- Listen more than you talk — ask one good question and let them open up."""
+""" + get_nust_context_for_prompt()
 
 # ── Tools ───────────────────────────────────────────────────
 tools_map = {
+    "get_community_advice": lambda **k: get_community_advice(
+    k.get("topic", ""), k.get("context", "")
+),
+"get_faculty_review": lambda **k: get_faculty_review(
+    k.get("professor_name", ""), k.get("course", "")
+),
     "assess_situation": lambda **k: {"status": "recorded", "summary": f"Stress {k['stress_level']}/10, sleep {k['sleep_hours']}hrs, finances: {k['financial_stress']}, academics: {k['academic_status']}"},
     "build_plan": lambda **k: {
     "status": "plan_ready",
@@ -69,6 +72,7 @@ tools_map = {
     "hours_per_day": k["available_hours_per_day"],
     "timeframe": f"{k['timeframe_days']} days",
     "constraints": k["constraints"],
+    "lookup_nust": lambda **k: search_nust_knowledge(k.get("query", "")),
     "instruction": "Now write a warm, detailed, day-by-day plan for this student. Week 1 should focus on building habits, Week 2 on momentum, Week 3-4 on results. Include specific times (e.g. 9am-11am: work on X), specific resources by name, and realistic breaks. Write it as flowing paragraphs, not bullet points. Make it feel like a friend wrote it, not a productivity app."
 },
     "search_resources": lambda **k: {"resources": {"python": ["CS50P (free)", "Automate the Boring Stuff"], "ai": ["Fast.ai", "Karpathy Zero to Hero (YouTube)"], "web": ["The Odin Project", "fullstackopen.com"], "java": ["MOOC.fi", "Coding with John (YouTube)"], "internship": ["Rozee.pk", "LinkedIn Pakistan", "NUST alumni network"], "freelance": ["Upwork", "Fiverr"], "urdu": ["Rekhta.org", "UrduPoint", "BBC Urdu"], "stress": ["university counseling", "r/stress"]}.get(k["topic"].lower(), ["Coursera (audit free)", "YouTube", "Google Scholar"])},
@@ -76,6 +80,37 @@ tools_map = {
 }
 
 GROQ_TOOL_DEFINITIONS = [
+    {
+    "type": "function",
+    "function": {
+        "name": "get_community_advice",
+        "description": "Get real community wisdom from r/NUST high-upvote posts on any student topic. Use this when students ask about real experiences, advice from seniors, or anything where community perspective matters more than official policy.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {"type": "string", "description": "Topic to get community advice on"},
+                "context": {"type": "string", "description": "Additional context about the student's situation"}
+            },
+            "required": ["topic"]
+        }
+    }
+},
+{
+    "type": "function",
+    "function": {
+        "name": "get_faculty_review",
+        "description": "Get student reviews and ratings for a NUST faculty member from RateDeezNUST. Use when student asks about a specific professor or wants help choosing courses.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "professor_name": {"type": "string", "description": "Name of the professor"},
+                "course": {"type": "string", "description": "Course name (optional)"}
+            },
+            "required": ["professor_name"]
+        }
+    }
+},
+    {"type": "function", "function": {"name": "lookup_nust", "description": "Search the NUST knowledge base for accurate information about NUST policies, grading, probation, attendance, GPA rules, hostel, internships, and student life. Use this whenever a student asks anything NUST-specific.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "The specific NUST topic to look up"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "assess_situation", "description": "Silently record student situation. Never mention this.", "parameters": {"type": "object", "properties": {"stress_level": {"type": "integer"}, "sleep_hours": {"type": "number"}, "financial_stress": {"type": "string"}, "academic_status": {"type": "string"}}, "required": ["stress_level", "sleep_hours", "financial_stress", "academic_status"]}}},
     {"type": "function", "function": {"name": "build_plan", "description": "Silently build a plan. Never mention this.", "parameters": {"type": "object", "properties": {"goals": {"type": "array", "items": {"type": "string"}}, "available_hours_per_day": {"type": "number"}, "timeframe_days": {"type": "integer"}, "constraints": {"type": "string"}}, "required": ["goals", "available_hours_per_day", "timeframe_days", "constraints"]}}},
     {"type": "function", "function": {"name": "search_resources", "description": "Silently find resources. Never mention this.", "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "student_level": {"type": "string"}, "location": {"type": "string"}}, "required": ["topic", "student_level", "location"]}}},
@@ -84,6 +119,41 @@ GROQ_TOOL_DEFINITIONS = [
 
 def build_gemini_tools():
     return types.Tool(function_declarations=[
+        types.FunctionDeclaration(
+    name="get_community_advice",
+    description="Get real community wisdom from r/NUST high-upvote posts. Use for real student experiences and senior advice.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "topic": types.Schema(type="STRING", description="Topic to get community advice on"),
+            "context": types.Schema(type="STRING", description="Student's situation context"),
+        },
+        required=["topic"]
+    )
+),
+types.FunctionDeclaration(
+    name="get_faculty_review",
+    description="Get student reviews for a NUST professor from RateDeezNUST.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "professor_name": types.Schema(type="STRING", description="Professor name"),
+            "course": types.Schema(type="STRING", description="Course name"),
+        },
+        required=["professor_name"]
+    )
+),
+        types.FunctionDeclaration(
+    name="lookup_nust",
+    description="Search NUST knowledge base for policies, grading, probation, GPA rules, hostel, internships. Use for any NUST-specific question.",
+    parameters=types.Schema(
+        type="OBJECT",
+        properties={
+            "query": types.Schema(type="STRING", description="NUST topic to look up"),
+        },
+        required=["query"]
+    )
+),
         types.FunctionDeclaration(
             name="assess_situation",
             description="Silently record the student's situation. Never mention this tool.",
