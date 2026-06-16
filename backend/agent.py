@@ -11,6 +11,7 @@ from memory import load_memory, save_memory, update_mood, update_situation, upda
 from nust_knowledge import search_nust_knowledge, get_nust_context_for_prompt
 from realtime.community_fetcher import get_community_advice
 from nust_faculty import get_professor_info, get_top_professors
+from nust_scraper import get_nust_internships, get_nust_news, get_nust_updates, start_background_scraper
 import base64
 
 load_dotenv()
@@ -83,6 +84,9 @@ CARNEGIE INTERACTION PRINCIPLES:
 
 # ── Tools Map ───────────────────────────────────────────────
 tools_map = {
+    "get_nust_internships": lambda **k: get_nust_internships(k.get("dept", "ALL")),
+    "get_nust_news": lambda **k: get_nust_news(k.get("dept", "ALL")),
+    "get_nust_updates": lambda **k: get_nust_updates(k.get("query", "")),
     "assess_situation": lambda **k: {
         "status": "recorded",
         "summary": f"Stress {k['stress_level']}/10, sleep {k['sleep_hours']}hrs, finances: {k['financial_stress']}, academics: {k['academic_status']}"
@@ -116,6 +120,9 @@ tools_map = {
 
 # ── Groq Tool Definitions ───────────────────────────────────
 GROQ_TOOL_DEFINITIONS = [
+    {"type": "function", "function": {"name": "get_nust_internships", "description": "Get live internship opportunities scraped from NUST official notice boards. Use when student asks about internships, career opportunities, or job openings at NUST.", "parameters": {"type": "object", "properties": {"dept": {"type": "string", "description": "Department filter e.g. SEECS, ALL"}}, "required": ["dept"]}}},
+    {"type": "function", "function": {"name": "get_nust_news", "description": "Get latest news and announcements from NUST official pages. Use when student asks about NUST news, policy updates, or recent announcements.", "parameters": {"type": "object", "properties": {"dept": {"type": "string", "description": "Department filter e.g. SEECS, ALL"}}, "required": ["dept"]}}},
+    {"type": "function", "function": {"name": "get_nust_updates", "description": "Search all NUST notice boards for updates relevant to a query. Use for any question about what's happening at NUST right now.", "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "Search query"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "assess_situation", "description": "Silently record student situation. Never mention this.", "parameters": {"type": "object", "properties": {"stress_level": {"type": "integer"}, "sleep_hours": {"type": "number"}, "financial_stress": {"type": "string"}, "academic_status": {"type": "string"}}, "required": ["stress_level", "sleep_hours", "financial_stress", "academic_status"]}}},
     {"type": "function", "function": {"name": "build_plan", "description": "Silently build a plan. Never mention this.", "parameters": {"type": "object", "properties": {"goals": {"type": "array", "items": {"type": "string"}}, "available_hours_per_day": {"type": "number"}, "timeframe_days": {"type": "integer"}, "constraints": {"type": "string"}}, "required": ["goals", "available_hours_per_day", "timeframe_days", "constraints"]}}},
     {"type": "function", "function": {"name": "search_resources", "description": "Silently find resources. Never mention this.", "parameters": {"type": "object", "properties": {"topic": {"type": "string"}, "student_level": {"type": "string"}, "location": {"type": "string"}}, "required": ["topic", "student_level", "location"]}}},
@@ -129,6 +136,33 @@ GROQ_TOOL_DEFINITIONS = [
 # ── Gemini Tool Definitions ─────────────────────────────────
 def build_gemini_tools():
     return types.Tool(function_declarations=[
+        types.FunctionDeclaration(
+            name="get_nust_internships",
+            description="Get live internship opportunities from NUST notice boards.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={"dept": types.Schema(type="STRING", description="Department e.g. SEECS, ALL")},
+                required=["dept"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_nust_news",
+            description="Get latest news and announcements from NUST official pages.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={"dept": types.Schema(type="STRING", description="Department e.g. SEECS, ALL")},
+                required=["dept"]
+            )
+        ),
+        types.FunctionDeclaration(
+            name="get_nust_updates",
+            description="Search all NUST notice boards for relevant updates.",
+            parameters=types.Schema(
+                type="OBJECT",
+                properties={"query": types.Schema(type="STRING", description="Search query")},
+                required=["query"]
+            )
+        ),
         types.FunctionDeclaration(
             name="assess_situation",
             description="Silently record the student situation. Never mention this tool.",

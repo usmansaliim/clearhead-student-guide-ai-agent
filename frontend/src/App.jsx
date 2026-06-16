@@ -212,7 +212,7 @@ function Sidebar({ profile, situation, plan, moodHistory }) {
           </div>
           <div>
             <h1 className="text-white font-black text-sm leading-none">ClearHead</h1>
-            <p className="text-xs mt-0.5" style={{ color: "#00C896" }}>NUST Edition</p>
+            <p className="text-xs mt-0.5" style={{ color: "#00C896" }}>University Edition</p>
           </div>
         </div>
       </div>

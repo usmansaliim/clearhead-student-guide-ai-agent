@@ -2,6 +2,13 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from agent import ClearHeadAgent
 from realtime.scheduler import refresher
+from nust_scraper import start_background_scraper
+
+app = Flask(__name__)
+CORS(app)
+
+# Start background scraper
+start_background_scraper()
 
 app = Flask(__name__)
 CORS(app)
