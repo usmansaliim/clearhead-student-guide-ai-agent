@@ -1,0 +1,8 @@
+cd X:\clearhead
+venv\Scripts\activate
+cd backend
+python app.py
+
+
+cd X:\clearhead\frontend
+npm run dev -- --host

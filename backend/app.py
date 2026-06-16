@@ -14,9 +14,12 @@ refresher.start()
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.json
+    print("REQUEST DATA:")
+    print(data)
     session_id = data.get("session_id", "default")
     user_message = data.get("message", "")
     profile = data.get("profile", {})
+    image = data.get("image", None)
 
     if session_id not in sessions:
         sessions[session_id] = ClearHeadAgent(session_id=session_id)
@@ -25,14 +28,17 @@ def chat():
 
     if profile and not agent.memory.get("name"):
         agent.memory["name"] = profile.get("name")
-        agent.memory["university"] = profile.get("university")
+        agent.memory["university"] = "NUST"
+        agent.memory["department"] = profile.get("department")
         agent.memory["year"] = profile.get("year")
+        agent.memory["semester"] = profile.get("semester")
         agent.memory["challenges"] = profile.get("challenges", [])
 
     if user_message == "__init__":
         response = agent.greet()
     else:
-        response = agent.chat(user_message)
+        print("IMAGE EXISTS:", image is not None)
+        response = agent.chat(user_message, image=image)
 
     return jsonify({
         "response": response,
