@@ -6,6 +6,11 @@ from nust_scraper import start_background_scraper
 
 app = Flask(__name__)
 CORS(app)
+from flask import request as flask_request
+
+@app.before_request
+def handle_ngrok():
+    pass
 
 # Start background scraper
 start_background_scraper()
